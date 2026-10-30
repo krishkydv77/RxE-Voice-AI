@@ -1,0 +1,19 @@
+Aap inme se koi bhi sawal puch sakte hain jo SerpAPI ko trigger kar de:
+
+Latest Medical Updates / New Approvals (2026):
+
+1. "What are the latest FDA approved treatments for Alzheimer's disease in 2026?"
+
+2. "Recent clinical trial updates on universal flu vaccines."
+
+Specific Current Pricing & Market Availability:
+
+3 . "What is the current market price of the latest Omnipod 5 Automated Insulin Delivery system in India?"
+
+4. "Current stock availability of specific newly launched cardiac stents."
+
+Niche or Very Specific External Queries:
+
+5. "What are the specific guidelines released by WHO last week regarding digital health prescriptions?"
+
+

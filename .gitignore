@@ -1,0 +1,22 @@
+# Environment variables (API keys)
+.env
+
+# Python cache and virtual environments
+__pycache__/
+*.py[cod]
+*$py.class
+venv/
+env/
+.venv/
+
+# Vector Database local storage
+vectordb/
+
+# Logs and Metrics
+logs/
+*.log
+*.jsonl
+
+# OS generated files
+.DS_Store
+Thumbs.db

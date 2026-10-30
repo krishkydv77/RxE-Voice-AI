@@ -1,0 +1,188 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>RxE-Voice AI</title>
+<style>
+  :root{--ink:#12303a;--paper:#eef3f1;--card:#fbfdfc;--line:#c9d8d3;--teal:#0f766e;--rec:#b42318;--mute:#5d7580}
+  *{box-sizing:border-box}
+  body{margin:0;min-height:100vh;background:var(--paper);color:var(--ink);font:16px/1.5 "Segoe UI",system-ui,sans-serif;
+       display:flex;justify-content:center;padding:24px 16px}
+  main{width:100%;max-width:560px}
+  h1{font-size:1.35rem;margin:0 0 2px}
+  .sub{color:var(--mute);margin:0 0 22px;font-size:.92rem}
+  .stage{display:flex;flex-direction:column;align-items:center;gap:12px;padding:26px 16px;background:var(--card);
+         border:1px solid var(--line);border-radius:14px}
+  #mic{width:96px;height:96px;border-radius:50%;border:0;background:var(--teal);color:#fff;cursor:pointer;
+       display:grid;place-items:center;transition:transform .15s,background .15s}
+  #mic:hover{transform:scale(1.04)} #mic:focus-visible{outline:3px solid var(--ink);outline-offset:3px}
+  #mic.rec{background:var(--rec);animation:pulse 1.2s ease-in-out infinite}
+  #mic:disabled{background:#8aa39e;cursor:wait;animation:none}
+  .mode-toggle{display:flex;align-items:center;gap:8px;font-size:0.9rem;color:var(--mute);cursor:pointer;margin-top:4px;}
+  @keyframes pulse{50%{box-shadow:0 0 0 14px rgba(180,35,24,.16)}}
+  @media (prefers-reduced-motion:reduce){#mic.rec{animation:none}}
+  #status{color:var(--mute);min-height:1.5em;text-align:center}
+  .turn{margin-top:16px;padding:14px 16px;background:var(--card);border:1px solid var(--line);border-radius:10px}
+  .turn .who{font-size:.8rem;color:var(--mute);margin-bottom:2px}
+  .turn p{margin:0 0 10px;white-space:pre-wrap} .turn p:last-of-type{margin-bottom:0}
+  .chips{display:flex;flex-wrap:wrap;gap:6px;margin-top:10px;font-size:.78rem}
+  .chips span{padding:2px 8px;border:1px solid var(--line);border-radius:99px;color:var(--mute)}
+  .chips .ok{border-color:var(--teal);color:var(--teal)} .chips .bad{border-color:var(--rec);color:var(--rec)}
+  .err{color:var(--rec)}
+  button.link{background:none;border:0;color:var(--mute);text-decoration:underline;cursor:pointer;margin-top:18px;font:inherit;font-size:.85rem}
+</style>
+</head>
+<body>
+<main>
+  <h1>RxE-Voice AI</h1>
+  <h1>Healthcare & Medical E-Commerce Support Assistant</h1>
+  <p class="sub">Tap the mic once. After the reply, it will automatically wait 1 second and listen to your next question.</p>
+
+  <div class="stage">
+    <button id="mic" aria-label="Start listening" title="Start listening">
+      <svg width="38" height="38" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><rect x="9" y="3" width="6" height="12" rx="3"/><path d="M5 11a7 7 0 0 0 14 0M12 18v3"/></svg>
+    </button>
+    <div id="status" role="status" aria-live="polite">Ready</div>
+    <label class="mode-toggle">
+      <input type="checkbox" id="continuousMode" checked> Continuous Conversation (Auto-listen)
+    </label>
+  </div>
+
+  <div id="log"></div>
+  <button class="link" id="reset">Start a new conversation</button>
+</main>
+
+<script>
+// ---- settings
+const SILENCE_MS = 1000;        
+const NO_SPEECH_MS = 8000;      
+const MAX_MS = 30000;           
+const CALIBRATE_MS = 400;       
+
+const mic = document.getElementById('mic'), statusEl = document.getElementById('status'), logEl = document.getElementById('log');
+const continuousCheckbox = document.getElementById('continuousMode');
+let session = localStorage.getItem('sid') || crypto.randomUUID();
+localStorage.setItem('sid', session);
+let recorder, chunks = [], stream, audioCtx, vadTimer, currentAudio, cancelled = false;
+
+const setStatus = t => { statusEl.textContent = t; };
+
+function cleanupAudio(){
+  clearInterval(vadTimer);
+  if (stream) stream.getTracks().forEach(t => t.stop());
+  if (audioCtx) audioCtx.close().catch(()=>{});
+  audioCtx = null;
+}
+
+async function start(){
+  if (currentAudio) currentAudio.pause();
+  try { stream = await navigator.mediaDevices.getUserMedia({audio:{echoCancellation:true,noiseSuppression:true}}); }
+  catch(e){ setStatus('Microphone permission needed (open on localhost or https)'); return; }
+
+  const mime = MediaRecorder.isTypeSupported('audio/webm;codecs=opus') ? 'audio/webm;codecs=opus' : '';
+  recorder = new MediaRecorder(stream, mime ? {mimeType:mime, audioBitsPerSecond:24000} : {audioBitsPerSecond:24000});
+  chunks = []; cancelled = false;
+  recorder.ondataavailable = e => e.data.size && chunks.push(e.data);
+  recorder.onstop = () => { cleanupAudio(); mic.classList.remove('rec'); cancelled ? idle() : send(); };
+  recorder.start();
+  mic.classList.add('rec'); mic.setAttribute('aria-label','Stop and send'); setStatus('Listening... ask your medical query');
+
+  audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+  const analyser = audioCtx.createAnalyser(); analyser.fftSize = 1024;
+  audioCtx.createMediaStreamSource(stream).connect(analyser);
+  const buf = new Float32Array(analyser.fftSize);
+  const t0 = performance.now();
+  let noiseSum = 0, noiseN = 0, speaking = false, lastVoice = 0;
+
+  vadTimer = setInterval(() => {
+    analyser.getFloatTimeDomainData(buf);
+    let sum = 0; for (let i = 0; i < buf.length; i++) sum += buf[i]*buf[i];
+    const rms = Math.sqrt(sum / buf.length), now = performance.now();
+
+    if (now - t0 < CALIBRATE_MS){ noiseSum += rms; noiseN++; return; }
+    const threshold = Math.max(0.02, (noiseN ? noiseSum/noiseN : 0.005) * 3);
+
+    if (rms > threshold){
+      if (!speaking){ speaking = true; setStatus('Listening... I will answer when you stop'); }
+      lastVoice = now;
+    }
+    if (speaking && now - lastVoice > SILENCE_MS) stopRec(false);
+    else if (!speaking && now - t0 > NO_SPEECH_MS){ stopRec(true); }
+    else if (now - t0 > MAX_MS) stopRec(false);
+  }, 50);
+}
+
+function stopRec(cancel){
+  if (!recorder || recorder.state !== 'recording') return;
+  cancelled = cancel;
+  recorder.stop();
+  if (cancel) setStatus('Did not hear anything. Tap the mic and try again.');
+}
+
+function idle(){ mic.disabled = false; mic.setAttribute('aria-label','Start listening'); }
+
+async function send(){
+  mic.disabled = true; setStatus('Thinking...');
+  const blob = new Blob(chunks, {type: recorder.mimeType || 'audio/webm'});
+  const fd = new FormData(); fd.append('audio', blob, 'audio.webm'); fd.append('session_id', session);
+  const t0 = performance.now();
+  try {
+    const r = await fetch('/api/voice', {method:'POST', body:fd});
+    const j = await r.json();
+    if (!r.ok) throw new Error(j.error || j.detail || r.status);
+    render(j, Math.round(performance.now() - t0));
+    mic.disabled = false;
+    
+    if (j.audios && j.audios.length) {
+      await play(j.audios);
+    }
+    
+    setStatus('Ready');
+
+    // Jaise hi audio bolkar khatam hogi, thik 1 second (1000ms) baad mic apne aap on ho jayega
+    if (continuousCheckbox.checked) {
+      setTimeout(() => { 
+        start(); 
+      }, 1000); // Yahan 1 second ka gap set kar diya gaya hai
+    }
+  } catch(e){
+    logEl.insertAdjacentHTML('afterbegin', `<div class="turn err">Error: ${e.message}</div>`);
+    setStatus('Something went wrong');
+    mic.disabled = false;
+  }
+}
+
+function render(j, roundtrip){
+  const m = j.metadata || {};
+  const core = m.core_ms, ok = core !== undefined && core <= 2000;
+  const chip = (t, c='') => `<span class="${c}">${t}</span>`;
+  const chips = m.status === 'ok' ? [
+    chip(`STT ${Math.round(m.stt_ms)} ms`), chip(`LLM ${Math.round(m.llm_ms)} ms`), chip(`TTS ${Math.round(m.tts_ms)} ms`),
+    chip(`STT+LLM+TTS ${Math.round(core)} ms`, ok ? 'ok' : 'bad'),
+    chip(`search ${Math.round(m.retrieval_ms)} ms`), m.web_ms ? chip(`web ${Math.round(m.web_ms)} ms`) : '',
+    chip(`source: ${j.path}`), chip(m.via_mcp ? 'tools: MCP' : 'tools: in-process', m.via_mcp ? 'ok' : ''), chip(`round-trip ${roundtrip} ms`)
+  ].join('') : '';
+  const esc = s => (s||'').replace(/[&<>]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]));
+  logEl.insertAdjacentHTML('afterbegin', `<div class="turn">
+    <div class="who">You</div><p>${esc(j.transcript) || '(nothing was heard)'}</p>
+    ${j.reply ? `<div class="who">Healthcare Assistant</div><p>${esc(j.reply)}</p>` : ''}
+    <div class="chips">${chips}</div></div>`);
+}
+
+async function play(list){
+  for (const b64 of list){
+    currentAudio = new Audio('data:audio/wav;base64,' + b64);
+    setStatus('Speaking... (tap the mic to interrupt)');
+    await new Promise(res => { currentAudio.onended = res; currentAudio.onerror = res; currentAudio.play().catch(res); });
+  }
+}
+
+mic.onclick = () => (recorder && recorder.state === 'recording') ? stopRec(false) : start();
+document.getElementById('reset').onclick = async () => {
+  await fetch('/api/session/' + session, {method:'DELETE'});
+  session = crypto.randomUUID(); localStorage.setItem('sid', session); logEl.innerHTML = ''; setStatus('New conversation');
+};
+</script>
+</body>
+</html>

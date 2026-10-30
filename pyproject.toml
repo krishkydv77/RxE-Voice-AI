@@ -1,0 +1,32 @@
+[project]
+name = "new-folder"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+authors = [
+    { name = "krishan", email = "krishkydv77@gmail.com" }
+]
+requires-python = ">=3.12"
+dependencies = [
+    "chromadb>=0.5",
+    "fastapi>=0.110",
+    "fastembed>=0.3",
+    "groq>=0.9",
+    "httpx[http2]>=0.27",
+    "langchain-chroma>=0.1.2",
+    "langchain-community>=0.2",
+    "langchain-core>=0.2",
+    "langchain-text-splitters>=0.2",
+    "mcp>=1.2,<2",
+    "pypdf>=4.0",
+    "python-dotenv>=1.0",
+    "python-multipart>=0.0.9",
+    "uvicorn[standard]>=0.29",
+]
+
+[project.scripts]
+new-folder = "new_folder:main"
+
+[build-system]
+requires = ["uv_build>=0.12.0,<0.13.0"]
+build-backend = "uv_build"

@@ -1,0 +1,21 @@
+# Web server
+fastapi>=0.110
+uvicorn[standard]>=0.29
+python-multipart>=0.0.9
+python-dotenv>=1.0
+
+# Sarvam (STT/TTS) + Groq (LLM) + SerpAPI calls
+httpx[http2]>=0.27
+groq>=0.9
+
+# LangChain: chunking, embedding, vector store, loaders
+langchain-core>=0.2
+langchain-text-splitters>=0.2
+langchain-community>=0.2
+langchain-chroma>=0.1.2
+chromadb>=0.5
+fastembed>=0.3
+pypdf>=4.0
+
+# MCP server
+mcp>=1.2,<2
